@@ -2,7 +2,7 @@
 
 **![index](README.assets/index.gif)**
 
-**Logger** is a runtime console for Spark AR.
+**Logger** is a runtime console for Spark AR. It's based on [CustomConsole](https://github.com/ypmits/ARrrrLibTest/tree/master/scripts/CustomConsole) in [ypmits/ARrrrLibTest](https://github.com/ypmits/ARrrrLibTest).
 
 
 
