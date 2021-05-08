@@ -324,11 +324,19 @@ export default (() => {
 
     return {
         log(content) {
-            promise.then(logger => logger.log(content));
+            promise.then(logger => {
+                if (logger != undefined) {
+                    logger.log(content)
+                }
+            });
         },
 
         watch(name: string, signal: BoolSignal | ScalarSignal | StringSignal | boolean | number | string) {
-            promise.then(logger => logger.watch(name, signal));
+            promise.then(logger => {
+                if (logger != undefined) {
+                    logger.watch(name, signal)
+                }
+            });
         }
     };
 })();
