@@ -8,7 +8,7 @@
 
 ## Install
 
-1. Download [LoggerUI.arblockpkg](https://github.com/pofulu/sparkar-logger/releases/latest/download/LoggerUI.arblockpkg) and [Logger.js](https://github.com/pofulu/sparkar-logger/releases/latest/download/Logger.js) (It's minimized, you can find source codes [here]( https://github.com/pofulu/sparkar-logger/tree/main/LoggerDemo/scripts))
+1. Download [LoggerUI.arblockpkg](https://github.com/pofulu/sparkar-logger/releases/latest/download/LoggerUI.arblockpkg) and [Logger.ts](https://github.com/pofulu/sparkar-logger/releases/latest/download/Logger.ts) (It's minimized, you can find source codes [here]( https://github.com/pofulu/sparkar-logger/tree/main/LoggerDemo/scripts))
 
 2. Drag them to your project
 
