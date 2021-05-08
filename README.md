@@ -41,7 +41,7 @@
 If you want to disable Logger, just remove the LoggerUI block in scene or disable the visible of the block. There is a different between above two ways:
 
 - **Remove** LoggerUI block, all `log`/`watch` in your script won't do anything.
-- **Disable the visible** of LoggerUI block, all `log`/`watch` with work by [`Diagnostics`](https://sparkar.facebook.com/ar-studio/learn/reference/classes/diagnosticsmodule#example).
+- **Disable the visible** of LoggerUI block, all `log`/`watch` will work by [`Diagnostics`](https://sparkar.facebook.com/ar-studio/learn/reference/classes/diagnosticsmodule#example).
 
 
 
@@ -54,7 +54,7 @@ TouchGestures.onPinch();
 // If you don't enable the capability in Spark AR, you'll get an error in console but no message in Logger
 ```
 
-If you want to catch them, you need to write your own try/catch and log messages will Logger in script.
+If you want to catch them, you need to write your own try/catch and log messages with Logger in script.
 
 ```javascript
 try {
