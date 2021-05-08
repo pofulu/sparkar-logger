@@ -34,10 +34,10 @@ class Scaler {
     }
 
     /**
-     * @returns {ScaleSignal}
+     * @returns {PointSignal}
      */
     get scaleMultiplier() {
-        return Reactive.pack3(1, 1, 1).mul(this.multiplier);
+        return Reactive.mul(Reactive.pack3(1, 1, 1), this.multiplier);
     }
 
     /**

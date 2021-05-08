@@ -1,35 +1,69 @@
 import Scene from 'Scene';
-import Patches from 'Patches';
 import Reactive from 'Reactive';
+import Diagnostics from 'Diagnostics';
 import TouchGestures from 'TouchGestures';
-import Time from 'Time';
-import { height, percentToFocalPlaneX, percentToFocalPlaneY, screenScale, width } from './Screen';
+import { invokeThenAsync, remap } from './ReactiveUtility';
+import { height, percentToFocalPlaneX, percentToFocalPlaneY, width } from './Screen';
 
-class LogObject {
-    value: any;
+// e.g. 13:01:04
+const timestamp = () => {
+    const HH = ('0' + new Date().getHours()).slice(-2);
+    const mm = ('0' + new Date().getMinutes()).slice(-2);
+    const ss = ('0' + new Date().getSeconds()).slice(-2);
+    return `${HH}:${mm}:${ss}`;
+};
+
+async function moveByPanGesture(dragable) {
+    const [perX1, perY1] = await Promise.all([
+        percentToFocalPlaneX(Reactive.val(1)),
+        percentToFocalPlaneY(Reactive.val(1)),
+    ]);
+
+    TouchGestures.onPan(dragable).subscribe(event => {
+        const targetX = remap(event.translation.x.expSmooth(20), 0, width, 0, perX1.mul(2)).add(dragable.transform.x.pinLastValue());
+        const targetY = remap(event.translation.y.expSmooth(20), 0, height, 0, perY1.mul(2)).add(dragable.transform.y.pinLastValue());
+
+        dragable.transform.x = targetX;
+        dragable.transform.y = targetY;
+    });
+}
+
+interface ILogObject {
+    getContent(enableTimestamp: boolean): string;
+}
+
+class LogObject implements ILogObject {
+    value: number | string | boolean;
     count: number;
-    constructor(string) {
+    time: string;
+    constructor(string: number | string | boolean) {
         this.value = string;
         this.count = 1;
+        this.time = timestamp();
     }
 
-    addCount() {
-        this.count++;
+    getContent(enableTimestamp): string {
+        const count = this.count <= 1 ? "" : `[${this.count}] `;
+        const time = enableTimestamp ? `[${this.time}] ` : "";
+        return `${time}${count}${this.value} \n`;
     }
 }
 
-class SignalObject {
-    name: any;
-    signal: any;
-    constructor(name, signal) {
+class SignalObject implements ILogObject {
+    name: string;
+    value: BoolSignal | ScalarSignal | StringSignal;
+    subscription: Subscription;
+    constructor(name: string, signal: BoolSignal | ScalarSignal | StringSignal, onUpdate: Function) {
         this.name = name;
-        this.signal = signal;
+        this.subscription = signal.monitor({ fireOnInitialValue: true }).subscribe(v => {
+            this.value = v.newValue;
+            onUpdate();
+        });
     }
-}
 
-type LoggerConfig = {
-    collapse?: boolean;
-    maxLines?: number;
+    getContent(): string {
+        return `${this.name}: ${this.value} \n`;
+    }
 }
 
 type StringFunction = (text: string) => void
@@ -37,25 +71,28 @@ type NumberFunction = (number: number) => void
 
 export class Logger {
     private startAt: number;
-    private scrollStartAt: any;
-    private lines: any[];
-    private update: any;
-    private maxLines: number;
-    private text: string;
+    private scrollStartAt: number;
+    private lines: ILogObject[];
+    private refreshSubscriptions: Subscription[];
     private onUpdateTextEvents: StringFunction[];
     private onUpdateProgressEvents: NumberFunction[];
-    private collapse: boolean;
+    private _text: string;
+    private _lock: boolean;
+    private _maxLine: number;
+    private _logTime: boolean;
+    printConsole: boolean;
 
-    constructor(config: LoggerConfig = { 'collapse': true, 'maxLines': 10 }) {
-        this.text = "";
-        this.maxLines = config.maxLines;
-        this.collapse = config.collapse;
+    constructor() {
         this.startAt = 0;
         this.scrollStartAt = 0;
         this.lines = [];
-        this.update;
+        this.refreshSubscriptions = [];
         this.onUpdateTextEvents = [];
         this.onUpdateProgressEvents = [];
+        this._text = '';
+        this._lock = false;
+        this._maxLine = 10;
+        this._logTime = false;
     }
 
     private get progress() {
@@ -63,21 +100,37 @@ export class Logger {
     }
 
     private get scrollBottomPosition() {
-        return (Math.max(this.lines.length, this.maxLines) - this.maxLines) * -1;
+        return (Math.max(this.lines.length, this._maxLine) - this._maxLine) * -1;
     }
 
-    setMaxLine(value: number);
-    setMaxLine(value: ScalarSignal);
-    setMaxLine(value: number | ScalarSignal) {
-        if (typeof value == 'number') {
-            this.maxLines = value;
+    set logTime(value: boolean) {
+        this._logTime = value;
+        this.refreshConsole();
+    }
+
+    get maxLine() {
+        return this._maxLine;
+    }
+
+    set maxLine(value: number) {
+        this._maxLine = value;
+        this.refreshConsole();
+    }
+
+    get lock() {
+        return this._lock;
+    }
+
+    set lock(value: boolean) {
+        this._lock = value;
+
+        if (!this._lock) {
             this.refreshConsole();
-        } else {
-            value.monitor({ fireOnInitialValue: true }).select('newValue').subscribe(v => {
-                this.maxLines = v;
-                this.refreshConsole();
-            });
         }
+    }
+
+    get text() {
+        return this._text;
     }
 
     onUpdateText(callback: StringFunction) {
@@ -88,35 +141,29 @@ export class Logger {
         this.onUpdateProgressEvents.push(callback);
     }
 
-    log(string) {
-        switch (typeof string) {
+    log(content) {
+        if (this.printConsole) {
+            Diagnostics.log(content)
+        }
+
+        switch (typeof content) {
             case "number":
             case "string":
             case "boolean":
-                if (this.collapse) {
-                    for (var i = 0; i < this.lines.length; i++) {
-                        if (this.lines[i] instanceof LogObject) {
-                            if (this.lines[i].value == string) {
-                                this.lines[i].addCount();
-                                this.refreshConsole();
-                                return;
-                            }
-                        }
-                    }
-                }
-                var log = new LogObject(string);
+                var log = new LogObject(content);
                 this.lines.push(log);
                 this.refreshConsole();
                 break;
             case "object":
-                var log = new LogObject("[object]");
+                const stringify = JSON.stringify(content);
+                var log = new LogObject(stringify === '{}' ? '[object]' : stringify);
                 this.lines.push(log);
                 this.refreshConsole();
                 break;
             case "function":
                 try {
-                    string.pinLastValue();
-                    var log = new LogObject(string.pinLastValue());
+                    content.pinLastValue();
+                    var log = new LogObject(content.pinLastValue());
                     this.lines.push(log);
                     this.refreshConsole();
                 } catch (err) {
@@ -139,17 +186,16 @@ export class Logger {
     }
 
     watch(name, signal) {
+        if (this.printConsole) {
+            Diagnostics.watch(name, signal);
+        }
+
         if (typeof signal.pinLastValue == "function") {
             try {
                 signal.pinLastValue();
-                const log = new SignalObject(name, signal);
+                const log = new SignalObject(name, signal, () => this.refreshConsole());
                 this.lines.push(log);
-
-                this.refreshConsole();
-
-                if (this.update == null) {
-                    this.update = Time.ms.monitor().subscribe(() => this.refreshConsole());
-                }
+                this.refreshSubscriptions.push(log.subscription);
             } catch (err) {
                 const log = new LogObject(name + ": [not a signal]");
                 this.lines.push(log);
@@ -164,12 +210,14 @@ export class Logger {
     }
 
     clear() {
-        this.text = "";
+        this._text = "";
         this.scrollStartAt = 0;
         this.lines = [];
         this.startAt = 0;
-        this.onUpdateTextEvents.forEach(e => e(this.text));
+        this.onUpdateTextEvents.forEach(e => e(this._text));
         this.onUpdateProgressEvents.forEach(e => e(this.progress));
+        this.refreshSubscriptions.forEach(s => s.unsubscribe());
+        this.refreshSubscriptions = [];
     }
 
     scrollToTop() {
@@ -195,101 +243,92 @@ export class Logger {
     }
 
     private refreshConsole() {
-        const moreThenMaxLine = this.lines.length > this.maxLines;
+        if (this._lock) {
+            return;
+        }
 
-        this.startAt = moreThenMaxLine ? this.lines.length - this.maxLines : 0;
-        this.text = "";
+        const moreThenMaxLine = this.lines.length > this._maxLine;
+        this.startAt = moreThenMaxLine ? this.lines.length - this._maxLine : 0;
+        this._text = "";
 
-        for (let i = moreThenMaxLine ? this.maxLines - 1 : this.lines.length - 1; i >= 0; i--) {
-
-            let index = i + this.startAt;
-            if (this.scrollStartAt != null) {
-                index += this.scrollStartAt;
-            }
-
-            if (this.lines[index] instanceof LogObject) {
-                const count = this.lines[index].count <= 1 ? "" : `[${this.lines[index].count}]`;
-                this.text += `> ${count} ${this.lines[index].value} \n`;
-            } else if (this.lines[index] instanceof SignalObject) {
-                this.text += `${this.lines[index].name}: ${this.lines[index].signal.pinLastValue()} \n`;
-            }
+        for (let i = moreThenMaxLine ? this._maxLine - 1 : this.lines.length - 1; i >= 0; i--) {
+            const index = i + this.startAt + this.scrollStartAt;
+            this._text += this.lines[index].getContent(this._logTime);
         }
 
         if (!this.lines.some(x => x instanceof SignalObject)) {
-            if (this.update != null) {
-                this.update.unsubscribe();
-                this.update = null;
+            if (this.refreshSubscriptions.length > 0) {
+                this.refreshSubscriptions.forEach(s => s.unsubscribe());
+                this.refreshSubscriptions = [];
             }
         }
 
-        this.onUpdateTextEvents.forEach(e => e(this.text));
         this.onUpdateProgressEvents.forEach(e => e(this.progress));
+        this.onUpdateTextEvents.forEach(e => e(this._text));
     }
 }
 
-export default (async () => {
-    const logger = new Logger();
-    const loggerUI = await Scene.root.findFirst('LoggerUI') as unknown as BlockSceneRoot;
+export default (() => {
+    const promise = (async () => {
+        const loggerUI = await Scene.root.findFirst('LoggerUI') as unknown as BlockSceneRoot;
+        if (loggerUI == undefined) {
+            return;
+        }
 
-    if (loggerUI == undefined) {
-        return;
-    }
+        if (!loggerUI.hidden.pinLastValue()) {
+            const logger = new Logger();
+            const [
+                printConsole,
+                logTime,
+                lock,
+                maxLine,
+                onClickClear,
+                onClickUp,
+                onClickDown,
+                onClickBottom,
+                onClickTop,
+            ] = await Promise.all([
+                loggerUI.outputs.getBoolean('printConsole'),
+                loggerUI.outputs.getBoolean('logTime'),
+                loggerUI.outputs.getBoolean('lock'),
+                loggerUI.outputs.getScalar('maxLine'),
+                loggerUI.outputs.getPulseOrFallback('onClickClear', Reactive.once()),
+                loggerUI.outputs.getPulseOrFallback('onClickUp', Reactive.once()),
+                loggerUI.outputs.getPulseOrFallback('onClickDown', Reactive.once()),
+                loggerUI.outputs.getPulseOrFallback('onClickBottom', Reactive.once()),
+                loggerUI.outputs.getPulseOrFallback('onClickTop', Reactive.once()),
+            ]);
 
-    const [
-        maxLine,
-        onClickClear,
-        onClickUp,
-        onClickDown,
-        onClickBottom,
-        onClickTop,
-    ] = await Promise.all([
-        loggerUI.outputs.getScalar('maxLine'),
-        // Because the bug of Spark AR v112, we can't get the pulse output from block.
-        // You can try to replace 'Patches' to 'loggerUI' once the bug fixed.
-        // So that you won't need to link the output from block to patch.
-        Patches.outputs.getPulse('onClickClear'),
-        Patches.outputs.getPulse('onClickUp'),
-        Patches.outputs.getPulse('onClickDown'),
-        Patches.outputs.getPulse('onClickBottom'),
-        Patches.outputs.getPulse('onClickTop'),
-    ]);
+            onClickClear.subscribe(() => logger.clear());
+            onClickUp.subscribe(() => logger.scrollUp());
+            onClickDown.subscribe(() => logger.scrollDown());
+            onClickBottom.subscribe(() => logger.scrollToBottom());
+            onClickTop.subscribe(() => logger.scrollToTop());
 
-    logger.setMaxLine(maxLine);
-    logger.onUpdateText(text => loggerUI.inputs.setString('Content', text));
-    logger.onUpdateProgress(value => loggerUI.inputs.setScalar('Progress', value));
+            await Promise.all([
+                invokeThenAsync(maxLine.monitor({ fireOnInitialValue: true }), n => logger.maxLine = n.newValue),
+                invokeThenAsync(lock.monitor({ fireOnInitialValue: true }), n => logger.lock = n.newValue),
+                invokeThenAsync(logTime.monitor({ fireOnInitialValue: true }), b => logger.logTime = b.newValue),
+                invokeThenAsync(printConsole.monitor({ fireOnInitialValue: true }), b => logger.printConsole = b.newValue),
+                moveByPanGesture(loggerUI),
+            ])
 
-    onClickClear.subscribe(() => logger.clear());
-    onClickUp.subscribe(() => logger.scrollUp());
-    onClickDown.subscribe(() => logger.scrollDown());
-    onClickBottom.subscribe(() => logger.scrollToBottom());
-    onClickTop.subscribe(() => logger.scrollToTop());
+            logger.onUpdateText(text => loggerUI.inputs.setString('Content', text));
+            logger.onUpdateProgress(value => loggerUI.inputs.setScalar('Progress', value));
 
-    await moveByPanGesture(loggerUI);
+            return logger;
+        } else {
+            return Diagnostics;
+        }
+    })();
 
-    return logger;
+    return {
+        log(content) {
+            promise.then(logger => logger.log(content));
+        },
+
+        watch(name: string, signal: BoolSignal | ScalarSignal | StringSignal | boolean | number | string) {
+            promise.then(logger => logger.watch(name, signal));
+        }
+    };
 })();
-
-
-async function moveByPanGesture(dragable) {
-    // Check capability
-    if (TouchGestures.onPan == undefined) {
-        throw 'Please enable "Touch Gestures -> Pan Gesture" in capabilites.';
-    }
-
-    const [perX1, perY1] = await Promise.all([
-        percentToFocalPlaneX(1),
-        percentToFocalPlaneY(1),
-    ]);
-
-    TouchGestures.onPan(dragable).subscribe(event => {
-        const targetX = remap(event.translation.x.expSmooth(20), 0, width, 0, perX1.mul(screenScale)).add(dragable.transform.x.pinLastValue());
-        const targetY = remap(event.translation.y.expSmooth(20), 0, height, 0, perY1.mul(screenScale)).add(dragable.transform.y.pinLastValue());
-
-        dragable.transform.x = targetX;
-        dragable.transform.y = targetY;
-    });
-}
-
-function remap(input, fromMin, fromMax, toMin, toMax) {
-    return Reactive.toRange(Reactive.fromRange(input, fromMin, fromMax), toMin, toMax);
-}
