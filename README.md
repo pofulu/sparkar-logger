@@ -54,7 +54,7 @@ TouchGestures.onPinch();
 // If you don't enable the capability in Spark AR, you'll get an error in console but no message in Logger
 ```
 
-If you want to catch them, you need to write your own try/catch and log messages with Logger in script.
+If you want to catch them, you need to write your own try/catch and log messages will Logger in script.
 
 ```javascript
 try {
